@@ -1,5 +1,6 @@
 use db_module::add;
 
 fn main() {
-  println!("{}", add(34, 35));
+    println!("hello world from the db module");
+    println!("{}", add(34, 35));
 }
