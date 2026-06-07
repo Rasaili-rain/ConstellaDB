@@ -3,7 +3,7 @@ use db_module::*;
 fn main() {
   let mut engine = Engine::new();
 
-  let user = Table {
+  let user_table = Table {
     name: "user_table".to_string(),
     attrs: vec![
       Attr { name: "id".to_string(), data_type: Type::Int },
@@ -12,5 +12,16 @@ fn main() {
     ]
   };
 
-  engine.create_table(&user).unwrap();
+  engine.create_table(&user_table).unwrap();
+
+  let user_1 = Entity {
+    of: "user_table".to_string(),
+    data: vec![
+      Data { name: "id".to_string(), value: Value::Int(123) },
+      Data { name: "name".to_string(), value: Value::VarChar("user1".to_string()) },
+      Data { name: "password".to_string(), value: Value::VarChar("123".to_string()) },
+    ]
+  };
+
+  engine.insert(&user_1).unwrap();
 }
