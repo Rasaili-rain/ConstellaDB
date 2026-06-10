@@ -1,6 +1,5 @@
 // TODO
 // - Alter table (add col, delete col, modify col)
-// - Alter data (delete row, update row)
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -277,21 +276,7 @@ impl Engine {
     let mut result: Vec<Entity> = Vec::new();
 
     for row in 0..row_count {
-      let mut row_data: Vec<Data> = Vec::new();
-
-      // Create row data
-      for (idx, attr) in table.attrs.iter().enumerate() {
-        row_data.push(Data {
-          name: attr.name.clone(),
-          value: columns[idx][row].clone(),
-        });
-      }
-
-      // Create entity
-      let entity = Entity {
-        of: table.name.clone(),
-        data: row_data,
-      };
+      let entity = self.build_entity(&table, &columns, row);
 
       // Check the condition
       let matches = conditions
@@ -313,6 +298,106 @@ impl Engine {
     }
 
     Ok(result)
+  }
+
+  pub fn delete(&mut self, table_name: &str, conditions: Vec<Condition>) -> Result<usize, String> {
+    let table = match self.get_table(table_name) {
+      Some(t) => t,
+      None    => return Err(format!("Table with name '{}' doesn't exists", table_name)),
+    };
+
+    let mut columns = Vec::new();
+    for attr in &table.attrs {
+      columns.push(self.load_column(&table, attr)?);
+    }
+
+    if columns.is_empty() {
+      return Ok(0);
+    }
+
+    let row_count = columns[0].len();
+
+    // The columns that is going to rewrite the db
+    let mut new_columns: Vec<Vec<Value>> = vec![Vec::new(); columns.len()];
+    let mut deleted = 0;
+
+    for row in 0..row_count {
+      let entity = self.build_entity(&table, &columns, row);
+
+      let matches = conditions
+        .iter()
+        .all(|c| self.match_condition(&entity, c));
+
+      if matches {
+        deleted += 1;
+        continue;
+      }
+
+      // Add only the columns that donot match
+      for col in 0..columns.len() {
+        new_columns[col].push(columns[col][row].clone());
+      }
+    }
+
+    // Write the new column
+    for (idx, attr) in table.attrs.iter().enumerate() {
+      self.write_column(&table, attr, &new_columns[idx])?;
+    }
+
+    Ok(deleted)
+  }
+
+  pub fn update(&mut self, table_name: &str, updates: Vec<Data>, conditions: Vec<Condition>) -> Result<usize, String> {
+    let table = match self.get_table(table_name) {
+      Some(t) => t,
+      None    => return Err(format!("Table with name '{}' doesn't exists", table_name)),
+    };
+
+    let mut columns = Vec::new();
+    for attr in &table.attrs {
+      columns.push(self.load_column(&table, attr)?);
+    }
+
+    if columns.is_empty() {
+      return Ok(0);
+    }
+
+    let row_count = columns[0].len();
+    let mut updated = 0;
+    for row in 0..row_count {
+      let entity = self.build_entity(&table, &columns, row);
+      let matches = conditions
+          .iter()
+          .all(|c| self.match_condition(&entity, c));
+
+      if !matches {
+          continue;
+      }
+
+      updated += 1;
+      for update in &updates {
+        // Calculate the index of the column
+        let col_idx = table.attrs
+          .iter()
+          .position(|a| a.name == update.name)
+          .ok_or_else(|| {
+            format!(
+              "Unknown attribute '{}'",
+              update.name
+            )
+          })?;
+
+        // Override the column data
+        columns[col_idx][row] = update.value.clone();
+      }
+    }
+
+    // Write the columns again
+    for (idx, attr) in table.attrs.iter().enumerate() {
+      self.write_column(&table, attr, &columns[idx])?;
+    }
+
+    Ok(updated)
   }
 
 
@@ -443,6 +528,41 @@ impl Engine {
     Ok(values)
   }
 
+  fn write_column(&self, table: &Table, attr: &Attr, values: &[Value]) -> Result<(), String> {
+    let path = PathBuf::from(DB_DIR)
+      .join(&table.name)
+      .join(format!("{}.col", attr.name));
+
+    let mut file = OpenOptions::new()
+      .write(true)
+      .truncate(true)
+      .open(path)
+      .map_err(|e| e.to_string())?;
+
+    for value in values {
+      match (&attr.data_type, value) {
+        (Type::Int, Value::Int(v)) => {
+          file.write_all(&v.to_le_bytes())
+            .map_err(|e| e.to_string())?;
+        }
+
+        (Type::VarChar(size), Value::VarChar(v)) => {
+          let mut bytes = v.as_bytes().to_vec();
+          bytes.resize(*size, 0);
+
+          file.write_all(&bytes)
+            .map_err(|e| e.to_string())?;
+        }
+
+        _ => {
+          return Err("Type mismatch while writing column".into());
+        }
+      }
+    }
+
+    Ok(())
+  }
+
   fn match_condition(&self, entity: &Entity, condition: &Condition) -> bool {
     match condition {
       Condition::Compare { attr, value, op } => {
@@ -476,6 +596,27 @@ impl Engine {
       Condition::Or(left, right) => {
         self.match_condition(entity, left) || self.match_condition(entity, right)
       },
+    }
+  }
+
+  fn build_entity(
+    &self,
+    table: &Table,
+    columns: &[Vec<Value>],
+    row: usize,
+  ) -> Entity {
+    let mut data = Vec::new();
+
+    for (idx, attr) in table.attrs.iter().enumerate() {
+      data.push(Data {
+        name: attr.name.clone(),
+        value: columns[idx][row].clone(),
+      });
+    }
+
+    Entity {
+      of: table.name.clone(),
+      data,
     }
   }
 }
