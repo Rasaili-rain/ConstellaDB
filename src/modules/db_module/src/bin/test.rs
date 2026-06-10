@@ -12,7 +12,7 @@ fn main() {
     ]
   };
 
-  engine.create_table(&user_table).unwrap();
+  //engine.create_table(&user_table).unwrap();
 
   let user_1 = Entity {
     of: "user_table".to_string(),
@@ -23,5 +23,15 @@ fn main() {
     ]
   };
 
-  engine.insert(&user_1).unwrap();
+  //engine.insert(&user_1).unwrap();
+
+  let cond = Condition::Compare {
+    attr: "id".to_string(),
+    value: Value::Int(123),
+    op: Operator::Eq,
+  };
+
+  //engine.select("user_table", vec!["id", "name"], Condition {
+
+  //})
 }

@@ -24,6 +24,25 @@ impl fmt::Display for Type {
   }
 }
 
+pub enum Operator {
+  Eq,    // ==
+  NEq,   // !=
+  Lt,    // <
+  Le,    // <=
+  Gt,    // >
+  Ge,    // >=
+}
+
+pub enum Condition {
+  Compare {
+    attr: String,
+    value: Value,
+    op: Operator,
+  },
+  And(Box<Condition>, Box<Condition>),
+  Or(Box<Condition>, Box<Condition>),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attr {
   pub name: String,
