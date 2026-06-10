@@ -1,7 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::result::Result;
-use std::io::{BufWriter, BufReader, Write};
+use std::io::{BufWriter, BufReader, Read, Write};
 use std::fmt;
 use serde::{Deserialize, Serialize};
 
@@ -9,24 +9,10 @@ use serde::{Deserialize, Serialize};
 pub const DB_DIR: &str = "DB";
 pub const SCHEMA_FILE: &str = "schemas.json";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Type {
-  Int,
-  VarChar(usize),
-}
-
-impl fmt::Display for Type {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Type::Int => write!(f, "INT"),
-      Type::VarChar(size) => write!(f, "VARCHAR({})", size),
-    }
-  }
-}
 
 pub enum Operator {
   Eq,    // ==
-  NEq,   // !=
+  Ne,    // !=
   Lt,    // <
   Le,    // <=
   Gt,    // >
@@ -43,6 +29,26 @@ pub enum Condition {
   Or(Box<Condition>, Box<Condition>),
 }
 
+
+//=======
+// Table
+//=======
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Type {
+  Int,
+  VarChar(usize),
+}
+
+impl fmt::Display for Type {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Type::Int => write!(f, "INT"),
+      Type::VarChar(size) => write!(f, "VARCHAR({})", size),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attr {
   pub name: String,
@@ -55,6 +61,23 @@ pub struct Table {
   pub attrs: Vec<Attr>,
 }
 
+impl Table {
+  pub fn attr_exists(&self, attr_name: &str) -> bool {
+    for attr in &self.attrs {
+      if attr_name == attr.name {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+
+//=========
+// Entity
+//=========
+
+#[derive(Debug, Clone)]
 pub enum Value {
   Int(i32),
   VarChar(String),
@@ -69,15 +92,22 @@ impl fmt::Display for Value {
   }
 }
 
+#[derive(Debug)]
 pub struct Data {
   pub name: String,
   pub value: Value,
 }
 
+#[derive(Debug)]
 pub struct Entity {
   pub of: String,
   pub data: Vec<Data>,
 }
+
+
+//=========================
+// Engine of the db module
+//=========================
 
 pub struct Engine {
   tables: Vec<Table>,
@@ -104,6 +134,10 @@ impl Engine {
         tables: Self::load_schema(),
     }
   }
+
+  //==============================
+  // DATABASE MODULE PUBLIC API'S
+  //==============================
 
   pub fn create_table(&mut self, table: &Table) -> Result<(), String> {
     if self.table_exists(&table.name) {
@@ -184,6 +218,75 @@ impl Engine {
     Ok(())
   }
 
+  pub fn select(&mut self, table_name: &str, attrs: Vec<&str>, conditions: Vec<Condition>) -> Result<Vec<Entity>, String> {
+    let table = match self.get_table(table_name) {
+      Some(t) => t,
+      None    => return Err(format!("Table with name '{}' doesn't exists", table_name)),
+    };
+
+    // Verify attributes
+    for attr in &attrs {
+      if !table.attr_exists(attr) {
+        return Err(format!("Attribute '{}' doesn't exists in table {}", attr, table.name));
+      }
+    }
+
+    // Collect the required attributes
+    let req_attrs: Vec<&Attr> = table.attrs
+      .iter()
+      .filter(|a| attrs.contains(&a.name.as_str()))
+      .collect();
+
+    // Fetch the columns
+    let mut columns: Vec<Vec<Value>> = Vec::new();
+    for attr in &req_attrs {
+      columns.push(self.load_column(&table, &attr)?);
+    }
+
+    // If no columns were fetched then return empty
+    if columns.is_empty() {
+      return Ok(Vec::new());
+    }
+
+    let row_count = columns[0].len();
+    let mut result: Vec<Entity> = Vec::new();
+
+    for row in 0..row_count {
+      let mut row_data: Vec<Data> = Vec::new();
+
+      // Create row data
+      for (idx, attr) in req_attrs.iter().enumerate() {
+        row_data.push(Data {
+          name: attr.name.clone(),
+          value: columns[idx][row].clone(),
+        });
+      }
+
+      // Create entity
+      let entity = Entity {
+        of: table.name.clone(),
+        data: row_data,
+      };
+
+      // Check the condition
+      let matches = conditions
+        .iter()
+        .all(|c| self.match_condition(&entity, c));
+
+      // If all condition passes then its the result
+      if matches {
+        result.push(entity);
+      }
+    }
+
+    Ok(result)
+  }
+
+
+  //==============================
+  // DATABASE MODULE PRIVATE API'S
+  //==============================
+
   fn save_schema(&self) {
     let file = File::create(
       PathBuf::from(DB_DIR)
@@ -259,5 +362,87 @@ impl Engine {
     }
 
     Ok(())
+  }
+
+  fn load_column(&self, table: &Table, attr: &Attr) -> Result<Vec<Value>, String> {
+    if !self.table_exists(&table.name) {
+      return Err(format!("Table with name '{}' doesn't exists", table.name));
+    }
+
+    if !table.attr_exists(&attr.name) {
+      return Err(format!("Attribute '{}' doesn't exists in table {}", attr.name, table.name));
+    }
+
+    // Open the attribute file
+    let path = PathBuf::from(DB_DIR)
+      .join(&table.name)
+      .join(format!("{}.col", &attr.name));
+
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+
+    // Final value array
+    let mut values: Vec<Value> = Vec::new();
+
+    match attr.data_type {
+      Type::Int => {
+        // Buffer size should be 4
+        let mut buff = [0u8; 4];
+
+        while file.read_exact(&mut buff).is_ok() {
+          values.push(Value::Int(i32::from_le_bytes(buff)));
+        }
+      },
+
+      Type::VarChar(size) => {
+        // Buffer size should be size of the varchar size
+        let mut buff = vec![0u8; size];
+
+        while file.read_exact(&mut buff).is_ok() {
+          let s = String::from_utf8_lossy(&buff)
+            .trim_end_matches('\0')
+            .to_string();
+
+          values.push(Value::VarChar(s));
+        }
+      },
+    };
+
+    Ok(values)
+  }
+
+  fn match_condition(&self, entity: &Entity, condition: &Condition) -> bool {
+    match condition {
+      Condition::Compare { attr, value, op } => {
+        // Find the attribute for the compare
+        let Some(data) = entity.data
+          .iter()
+          .find(|d| d.name == *attr)
+        else {
+          return false;
+        };
+
+        match (&data.value, value, op) {
+          (Value::Int(a), Value::Int(b), Operator::Eq) => a == b,
+          (Value::Int(a), Value::Int(b), Operator::Ne) => a != b,
+          (Value::Int(a), Value::Int(b), Operator::Gt) => a >  b,
+          (Value::Int(a), Value::Int(b), Operator::Ge) => a >= b,
+          (Value::Int(a), Value::Int(b), Operator::Lt) => a <  b,
+          (Value::Int(a), Value::Int(b), Operator::Le) => a <= b,
+
+          (Value::VarChar(a), Value::VarChar(b), Operator::Eq) => a == b,
+          (Value::VarChar(a), Value::VarChar(b), Operator::Ne) => a != b,
+
+          _ => false,
+        }
+      },
+
+      Condition::And(left, right) => {
+        self.match_condition(entity, left) && self.match_condition(entity, right)
+      },
+
+      Condition::Or(left, right) => {
+        self.match_condition(entity, left) || self.match_condition(entity, right)
+      },
+    }
   }
 }

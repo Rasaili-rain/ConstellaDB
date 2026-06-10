@@ -12,26 +12,38 @@ fn main() {
     ]
   };
 
-  //engine.create_table(&user_table).unwrap();
+  engine.create_table(&user_table).unwrap();
 
-  let user_1 = Entity {
-    of: "user_table".to_string(),
-    data: vec![
-      Data { name: "id".to_string(), value: Value::Int(123) },
-      Data { name: "name".to_string(), value: Value::VarChar("user1".to_string()) },
-      Data { name: "password".to_string(), value: Value::VarChar("123".to_string()) },
-    ]
-  };
+  for i in 0..10 {
+    let user_1 = Entity {
+      of: "user_table".to_string(),
+      data: vec![
+        Data { name: "id".to_string(), value: Value::Int(i) },
+        Data { name: "name".to_string(), value: Value::VarChar("abcd".to_string()) },
+        Data { name: "password".to_string(), value: Value::VarChar("4567".to_string()) },
+      ]
+    };
+    engine.insert(&user_1).unwrap();
+  }
 
-  //engine.insert(&user_1).unwrap();
+  // id == 1 && name == abcd
+  let cond = Condition::And(
+    Box::new(
+      Condition::Compare {
+        attr: "id".to_string(),
+        value: Value::Int(1),
+        op: Operator::Eq,
+      }
+    ),
+    Box::new(
+      Condition::Compare {
+        attr: "name".to_string(),
+        value: Value::VarChar("abcd".to_string()),
+        op: Operator::Eq,
+      }
+    ),
+  );
 
-  let cond = Condition::Compare {
-    attr: "id".to_string(),
-    value: Value::Int(123),
-    op: Operator::Eq,
-  };
-
-  //engine.select("user_table", vec!["id", "name"], Condition {
-
-  //})
+  let result = engine.select("user_table", vec!["id", "name", "password"], vec![cond]).unwrap();
+  println!("{:?}", result);
 }
