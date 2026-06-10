@@ -1,3 +1,7 @@
+// TODO
+// - Alter table (add col, delete col, modify col)
+// - Alter data (delete row, update row)
+
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::result::Result;
@@ -139,6 +143,10 @@ impl Engine {
   // DATABASE MODULE PUBLIC API'S
   //==============================
 
+  //=====
+  // DDL
+  //=====
+
   pub fn create_table(&mut self, table: &Table) -> Result<(), String> {
     if self.table_exists(&table.name) {
       return Err(format!("Table with name '{}' already exists", table.name));
@@ -167,6 +175,29 @@ impl Engine {
 
     Ok(())
   }
+
+  pub fn drop_table(&mut self, table_name: &str) -> Result<(), String> {
+    if !self.table_exists(table_name) {
+      return Err(format!("Table with name '{}' doesnt exists", table_name));
+    }
+
+    // Remove from the filesystem
+    let path = PathBuf::from(DB_DIR)
+      .join(table_name);
+
+    fs::remove_dir_all(path)
+      .map_err(|e| e.to_string());
+
+    // Remove from schema
+    self.tables.retain(|t| t.name != table_name);
+    self.save_schema();
+
+    Ok(())
+  }
+
+  //=====
+  // DML
+  //=====
 
   pub fn insert(&mut self, entity: &Entity) -> Result<(), String> {
     let table = match self.get_table(&entity.of) {
@@ -231,16 +262,10 @@ impl Engine {
       }
     }
 
-    // Collect the required attributes
-    let req_attrs: Vec<&Attr> = table.attrs
-      .iter()
-      .filter(|a| attrs.contains(&a.name.as_str()))
-      .collect();
-
-    // Fetch the columns
+    // Load all the columns
     let mut columns: Vec<Vec<Value>> = Vec::new();
-    for attr in &req_attrs {
-      columns.push(self.load_column(&table, &attr)?);
+    for attr in &table.attrs {
+      columns.push(self.load_column(table, attr)?);
     }
 
     // If no columns were fetched then return empty
@@ -255,7 +280,7 @@ impl Engine {
       let mut row_data: Vec<Data> = Vec::new();
 
       // Create row data
-      for (idx, attr) in req_attrs.iter().enumerate() {
+      for (idx, attr) in table.attrs.iter().enumerate() {
         row_data.push(Data {
           name: attr.name.clone(),
           value: columns[idx][row].clone(),
@@ -275,7 +300,15 @@ impl Engine {
 
       // If all condition passes then its the result
       if matches {
-        result.push(entity);
+        let filtered_data: Vec<Data> = entity.data
+          .into_iter()
+          .filter(|d| attrs.contains(&d.name.as_str()))
+          .collect();
+
+        result.push(Entity {
+          of: entity.of,
+          data: filtered_data,
+        });
       }
     }
 
