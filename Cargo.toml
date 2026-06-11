@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "src/modules/db_module", "src/modules/network_module",
+  "src/modules/protocol_module",
 ]
 
 [package]
