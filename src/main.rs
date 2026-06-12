@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    cmd_module::run();
 }

@@ -1,5 +1,5 @@
 use protocol_module::{
-    Message, MessageType, Command, BincodeSerializer, Serializer, ProtocolHandler
+    Message, MessageType, Command, BincodeSerializer, Serializer
 };
 
 fn hex_format(bytes: &[u8]) -> String {

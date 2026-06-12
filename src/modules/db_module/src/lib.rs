@@ -126,8 +126,8 @@ impl Engine {
           .join(SCHEMA_FILE)
           .to_str()
           .unwrap()
-      ).unwrap();
-
+      ).unwrap().write_all(b"[]").unwrap();
+      // always write [] so that table always have objects. in this case 0 objects
       return Self {
         tables: Vec::new(),
       };
@@ -184,7 +184,7 @@ impl Engine {
     let path = PathBuf::from(DB_DIR)
       .join(table_name);
 
-    fs::remove_dir_all(path)
+    let _ = fs::remove_dir_all(path)
       .map_err(|e| e.to_string());
 
     // Remove from schema

@@ -1,6 +1,8 @@
 [workspace]
 members = [
-  "src/modules/db_module", "src/modules/network_module",
+  "src/modules/cmd_module",
+  "src/modules/db_module", 
+  "src/modules/network_module",
   "src/modules/protocol_module",
 ]
 
@@ -10,6 +12,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cmd_module = { path = "src/modules/cmd_module" }
 
 [workspace.dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
