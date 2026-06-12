@@ -1,0 +1,7 @@
+[package]
+name = "cmd_module"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+db_module = { path = "../db_module" }
